@@ -409,7 +409,7 @@ public class Game implements ApplicationListener {
 		}
 		
 		sceneClass = null;
-		Music.INSTANCE.stop();
+		Music.INSTANCE.reset();
 		Sample.INSTANCE.reset();
 	}
 	
