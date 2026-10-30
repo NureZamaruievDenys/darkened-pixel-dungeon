@@ -97,6 +97,9 @@ public class HeroSelectScene extends PixelScene {
 	private static boolean heroWasRandomized = true;
 	private static boolean chalWasRandomized = false;
 
+	// Глобальная переменная для этой сцены (чтобы скрыть настройки у клиента)
+	private boolean hideSettingsForClient = false;
+
 	@Override
 	public void create() {
 		super.create();
@@ -105,6 +108,10 @@ public class HeroSelectScene extends PixelScene {
 
 		Badges.loadGlobal();
 		Journal.loadGlobal();
+
+		// ИСПРАВЛЕНИЕ ОБЛАСТИ ВИДИМОСТИ: Определяем, нужно ли скрыть настройки для клиента
+		hideSettingsForClient = com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer.isMultiplayerPending
+				&& !com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer.pendingHost;
 
 		insets = Game.platform.getSafeInsets(PlatformSupport.INSET_BLK).scale(1f/defaultZoom);
 
@@ -153,6 +160,38 @@ public class HeroSelectScene extends PixelScene {
 				super.onClick();
 
 				if (GamesInProgress.selectedClass == null) return;
+
+				// --- НАЧАЛО ПЕРЕХВАТА МУЛЬТИПЛЕЕРА ---
+				if (com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer.isMultiplayerPending) {
+					if (com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer.pendingHost) {
+						// ХОСТ
+						Dungeon.hero = null;
+						Dungeon.daily = Dungeon.dailyReplay = false;
+						Dungeon.initSeed();
+						Dungeon.init();
+
+						com.shatteredpixel.shatteredpixeldungeon.network.NetworkManager.instance().startHostFromCurrentDungeon(
+								com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer.pendingName
+						);
+
+						com.watabou.noosa.Game.switchScene(com.shatteredpixel.shatteredpixeldungeon.scenes.LobbyScene.class);
+					} else {
+						// КЛИЕНТ
+						boolean success = com.shatteredpixel.shatteredpixeldungeon.network.NetworkManager.instance().joinAsClient(
+								com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer.pendingIp,
+								com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer.pendingName,
+								GamesInProgress.selectedClass.name()
+						);
+
+						if (success) {
+							com.watabou.noosa.Game.switchScene(com.shatteredpixel.shatteredpixeldungeon.scenes.LobbyScene.class);
+						} else {
+							com.watabou.noosa.Game.switchScene(com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene.class);
+						}
+					}
+					return; // ПРЕРЫВАЕМ СТАНДАРТНЫЙ КОД
+				}
+				// --- КОНЕЦ ПЕРЕХВАТА ---
 
 				Dungeon.hero = null;
 				Dungeon.daily = Dungeon.dailyReplay = false;
@@ -229,7 +268,8 @@ public class HeroSelectScene extends PixelScene {
 		updateOptionsColor();
 		btnOptions.visible = false;
 
-		if(!SPDSettings.intro()){
+		// Скрываем настройки, если мы зашли как клиент
+		if(!SPDSettings.intro() && !hideSettingsForClient){
 			add(btnOptions);
 		}
 
@@ -339,7 +379,6 @@ public class HeroSelectScene extends PixelScene {
 				curX += btnWidth;
 			}
 
-			//add a darkening bar along bottom
 			if (insets.bottom > 0){
 				SkinnedBlock bar = new SkinnedBlock(Camera.main.width, insets.bottom, TextureCache.createSolid(0xAA000000));
 				bar.y = h + insets.top;
@@ -416,7 +455,6 @@ public class HeroSelectScene extends PixelScene {
 		GamesInProgress.randomizedClass = false;
 
 		try {
-			//loading these big jpgs fails sometimes, so we have a catch for it
 			background.texture(cl.splashArt());
 		} catch (Exception e){
 			Game.reportException(e);
@@ -447,14 +485,14 @@ public class HeroSelectScene extends PixelScene {
 			}
 
 			btnFade.visible = btnFade.active = true;
-
 			startBtn.visible = startBtn.active = true;
 
 			infoButton.visible = infoButton.active = true;
 			infoButton.setPos(heroName.right(), heroName.top() + (heroName.height() - infoButton.height())/2f);
 			align(infoButton);
 
-			btnOptions.visible = btnOptions.active = !SPDSettings.intro();
+			// Используем флаг для скрытия настроек
+			btnOptions.visible = btnOptions.active = !SPDSettings.intro() && !hideSettingsForClient;
 
 		} else {
 			title.visible = false;
@@ -469,7 +507,8 @@ public class HeroSelectScene extends PixelScene {
 			infoButton.visible = infoButton.active = true;
 			infoButton.setPos(startBtn.right(), startBtn.top());
 
-			btnOptions.visible = btnOptions.active = !SPDSettings.intro();
+			// Используем флаг для скрытия настроек
+			btnOptions.visible = btnOptions.active = !SPDSettings.intro() && !hideSettingsForClient;
 			btnOptions.setPos(startBtn.left()-btnOptions.width(), startBtn.top());
 
 			optionsPane.setPos(heroBtns.get(0).left(), startBtn.top() - optionsPane.height() - 2);
@@ -488,7 +527,7 @@ public class HeroSelectScene extends PixelScene {
 			SPDSettings.intro(false);
 		}
 		btnExit.visible = btnExit.active = !SPDSettings.intro();
-		//do not fade when a window is open
+
 		for (Object v : members){
 			if (v instanceof Window) resetFade();
 		}
@@ -548,7 +587,6 @@ public class HeroSelectScene extends PixelScene {
 	}
 
 	private void resetFade(){
-		//starts fading after 4 seconds, fades over 4 seconds.
 		uiAlpha = 2f;
 		updateFade();
 	}
@@ -563,19 +601,14 @@ public class HeroSelectScene extends PixelScene {
 	}
 
 	private class HeroBtn extends StyledButton {
-
 		private HeroClass cl;
-
 		private static final int MIN_WIDTH = 20;
 		private static final int HEIGHT = 24;
 
 		HeroBtn ( HeroClass cl ){
 			super(Chrome.Type.GREY_BUTTON_TR, "");
-
 			this.cl = cl;
-
 			icon(new Image(cl.spritesheet(), 0, 90, 12, 15));
-
 		}
 
 		@Override
@@ -612,7 +645,6 @@ public class HeroSelectScene extends PixelScene {
 		@Override
 		protected void layout() {
 			super.layout();
-			//if we're super tall (i.e. rendering into display inset) then put hero at the top
 			if (height > 30) {
 				icon.y = y + (HEIGHT - icon.height()) / 2f;
 			}
@@ -729,8 +761,8 @@ public class HeroSelectScene extends PixelScene {
 							icon,
 							Messages.get(HeroSelectScene.class, "daily"),
 							diff > 0 ?
-								Messages.get(HeroSelectScene.class, "daily_repeat") :
-								Messages.get(HeroSelectScene.class, "daily_desc"),
+									Messages.get(HeroSelectScene.class, "daily_repeat") :
+									Messages.get(HeroSelectScene.class, "daily_desc"),
 							Messages.get(HeroSelectScene.class, "daily_yes"),
 							Messages.get(HeroSelectScene.class, "daily_no")){
 						@Override
@@ -892,7 +924,6 @@ public class HeroSelectScene extends PixelScene {
 				optChals = new OptionSlider(Messages.get(HeroSelectScene.class, "randomize_chals_title"), "0", Integer.toString(max), 0, max) {
 					@Override
 					protected void onChange() {
-						//do nothing immediately
 					}
 				};
 				optChals.enable(false);
@@ -999,5 +1030,4 @@ public class HeroSelectScene extends PixelScene {
 			}
 		}
 	}
-
 }

@@ -647,17 +647,22 @@ public class InterlevelScene extends PixelScene {
 			Level level = Dungeon.newLevel();
 			Dungeon.switchLevel( level, -1 );
 		} else {
-			if (curTransition.destBranch != Dungeon.branch && Dungeon.depth >= 16 && Dungeon.depth <= 20) {
-				//FIXME avoids holding allies when entering city quest area, this is very sloppy though
-				// perhaps holding allies could be a property of the transition?
-			} else {
-				Mob.holdAllies(Dungeon.level);
+			// ИСПРАВЛЕНИЕ: Защита от NullPointerException при старте мультиплеера
+			if (Dungeon.level != null) {
+				if (curTransition != null && curTransition.destBranch != Dungeon.branch && Dungeon.depth >= 16 && Dungeon.depth <= 20) {
+					//FIXME avoids holding allies when entering city quest area, this is very sloppy though
+					// perhaps holding allies could be a property of the transition?
+				} else {
+					Mob.holdAllies(Dungeon.level);
+				}
+				Dungeon.saveAll();
 			}
-			Dungeon.saveAll();
 
 			Level level;
-			Dungeon.depth = curTransition.destDepth;
-			Dungeon.branch = curTransition.destBranch;
+			if (curTransition != null) {
+				Dungeon.depth = curTransition.destDepth;
+				Dungeon.branch = curTransition.destBranch;
+			}
 
 			if (Dungeon.levelHasBeenGenerated(Dungeon.depth, Dungeon.branch)) {
 				level = Dungeon.loadLevel( GamesInProgress.curSlot );
@@ -665,9 +670,24 @@ public class InterlevelScene extends PixelScene {
 				level = Dungeon.newLevel();
 			}
 
-			LevelTransition destTransition = level.getTransition(curTransition.destType);
+			LevelTransition destTransition = null;
+			if (curTransition != null) {
+				destTransition = level.getTransition(curTransition.destType);
+			}
+			if (destTransition == null) {
+				destTransition = level.getTransition(null); // Try to get any entrance
+			}
+			if (destTransition == null && !level.transitions.isEmpty()) {
+				destTransition = level.transitions.get(0); // Fallback to first transition
+			}
+
+			int transitionCell = -1;
+			if (destTransition != null) {
+				transitionCell = destTransition.cell();
+			}
+
 			curTransition = null;
-			Dungeon.switchLevel( level, destTransition.cell() );
+			Dungeon.switchLevel( level, transitionCell );
 		}
 
 	}
@@ -691,7 +711,7 @@ public class InterlevelScene extends PixelScene {
 	}
 
 	private void ascend() throws IOException {
-		if (curTransition.destBranch != Dungeon.branch && Dungeon.depth >= 16 && Dungeon.depth <= 20) {
+		if (curTransition != null && curTransition.destBranch != Dungeon.branch && Dungeon.depth >= 16 && Dungeon.depth <= 20) {
 			//FIXME avoids holding allies when entering city quest area, this is very sloppy though
 			// perhaps holding allies could be a property of the transition?
 		} else {
@@ -700,8 +720,10 @@ public class InterlevelScene extends PixelScene {
 		Dungeon.saveAll();
 
 		Level level;
-		Dungeon.depth = curTransition.destDepth;
-		Dungeon.branch = curTransition.destBranch;
+		if (curTransition != null) {
+			Dungeon.depth = curTransition.destDepth;
+			Dungeon.branch = curTransition.destBranch;
+		}
 
 		if (Dungeon.levelHasBeenGenerated(Dungeon.depth, Dungeon.branch)) {
 			level = Dungeon.loadLevel( GamesInProgress.curSlot );
@@ -709,9 +731,24 @@ public class InterlevelScene extends PixelScene {
 			level = Dungeon.newLevel();
 		}
 
-		LevelTransition destTransition = level.getTransition(curTransition.destType);
+		LevelTransition destTransition = null;
+		if (curTransition != null) {
+			destTransition = level.getTransition(curTransition.destType);
+		}
+		if (destTransition == null) {
+			destTransition = level.getTransition(null); // Try to get any entrance
+		}
+		if (destTransition == null && !level.transitions.isEmpty()) {
+			destTransition = level.transitions.get(0); // Fallback to first transition
+		}
+
+		int transitionCell = -1;
+		if (destTransition != null) {
+			transitionCell = destTransition.cell();
+		}
+
 		curTransition = null;
-		Dungeon.switchLevel( level, destTransition.cell() );
+		Dungeon.switchLevel( level, transitionCell );
 	}
 	
 	private void returnTo() throws IOException {

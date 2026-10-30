@@ -1,0 +1,89 @@
+@startuml
+' PlantUML: Диаграмма основных классов/взаимодействий
+
+class Dungeon {
+  +Hero hero
+  +Level level
+  +int depth
+  +init()
+  +newLevel()
+  +saveAll()
+  +loadAll()
+}
+
+class Level {
+  +Tile[] tiles
+  +List<Item> items
+  +List<Mob> mobs
+  +create()
+  +addMob(Mob)
+  +addItem(Item)
+}
+
+class Actor {
+  +int hp
+  +int pos
+  +act()
+  +spend(int)
+}
+
+class Hero {
+  +Belongings belongings
+  +move()
+  +attack()
+}
+
+class Mob {
+  +aiState
+  +act()
+}
+
+class Item {
+  +use()
+  +storeInBundle()
+}
+
+class Generator {
+  +generateLoot(Level)
+}
+
+class GameScene {
+  +render()
+  +update()
+}
+
+class PixelScene
+class Sprite
+class DungeonTilemap
+
+' Наследования
+Hero -|> Actor
+Mob -|> Actor
+
+' Ассоциации и зависимости
+Dungeon "1" *-- "1" Level : contains
+Dungeon "1" *-- "1" Hero : contains
+Level "1" *-- "*" Actor : contains
+Level "1" *-- "*" Item : contains
+Item <.. Generator : uses
+GameScene ..> Dungeon : reads
+GameScene ..> Sprite : renders
+GameScene ..> DungeonTilemap : renders
+Sprite ..> Actor : reads state
+
+note right of Dungeon
+Central game state manager
+holds current level, hero, global vars
+end note
+
+note left of Level
+Map, tiles, mobs, items
+generation via builders/painters
+end note
+
+note top of Actor
+Base class for Hero and Mob
+contains act(), buffs and position
+end note
+
+@enduml

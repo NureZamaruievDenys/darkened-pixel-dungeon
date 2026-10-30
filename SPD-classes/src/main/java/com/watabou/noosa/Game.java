@@ -24,7 +24,14 @@ package com.watabou.noosa;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.controllers.Controllers;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLVersion;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.TimeUtils;
 import com.watabou.glscripts.Script;
 import com.watabou.gltextures.TextureCache;
@@ -41,10 +48,20 @@ import com.watabou.utils.Reflection;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.IntBuffer;
 
 public class Game implements ApplicationListener {
 
 	public static Game instance;
+
+	public FrameBuffer fboLight, fboWorld, fboReflection, fboBase, fboBloomMask, fboPing, fboPong;
+	private TextureRegion regLight, regWorld, regReflection, regBase, regBloomMask, regPing, regPong;
+	public ShaderProgram lightmapShader, blurShader, combineShader, thresholdShader, waterShader;
+	private SpriteBatch postBatch;
+	private final IntBuffer glStateBuf = BufferUtils.newIntBuffer(16);
+	private int savedVbo = -1;
+	private int savedEbo = -1;
+	private boolean wasInGameplay = false;
 	
 	// Size of the EGL surface view
 	public static int width;
@@ -114,6 +131,12 @@ public class Game implements ApplicationListener {
 		Blending.useDefault();
 		TextureCache.reload();
 		Vertexbuffer.reload();
+
+		blurShader = new ShaderProgram(Gdx.files.internal("shaders/blur.vert"), Gdx.files.internal("shaders/convolve-1d.frag"));
+		combineShader = new ShaderProgram(Gdx.files.internal("shaders/blur.vert"), Gdx.files.internal("shaders/combine.frag"));
+		thresholdShader = new ShaderProgram(Gdx.files.internal("shaders/blur.vert"), Gdx.files.internal("shaders/gamma-threshold.frag"));
+		waterShader = new ShaderProgram(Gdx.files.internal("shaders/water_reflection.vert"), Gdx.files.internal("shaders/water_reflection.frag"));
+		lightmapShader = new ShaderProgram(Gdx.files.internal("shaders/blur.vert"), Gdx.files.internal("shaders/lightmap.frag"));
 	}
 
 	private GLVersion versionContextRef;
@@ -140,6 +163,34 @@ public class Game implements ApplicationListener {
 			
 			resetScene();
 		}
+
+		if (fboBase != null) {
+			if (fboWorld != null) fboWorld.dispose();
+			if (fboReflection != null) fboReflection.dispose();
+			fboBase.dispose();
+			fboBloomMask.dispose();
+			fboPing.dispose();
+			fboPong.dispose();
+		}
+		if (postBatch == null) postBatch = new SpriteBatch();
+		if (fboLight != null) fboLight.dispose();
+		fboLight = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+		regLight = new TextureRegion(fboLight.getColorBufferTexture());
+		regLight.flip(false, true);
+
+		fboWorld = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+		fboReflection = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+		fboBase = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+		fboBloomMask = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+		fboPing = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+		fboPong = new FrameBuffer(Pixmap.Format.RGBA8888, width, height, false);
+
+		regWorld = new TextureRegion(fboWorld.getColorBufferTexture()); regWorld.flip(false, true);
+		regReflection = new TextureRegion(fboReflection.getColorBufferTexture()); regReflection.flip(false, true);
+		regBase = new TextureRegion(fboBase.getColorBufferTexture()); regBase.flip(false, true);
+		regBloomMask = new TextureRegion(fboBloomMask.getColorBufferTexture()); regBloomMask.flip(false, true);
+		regPing = new TextureRegion(fboPing.getColorBufferTexture()); regPing.flip(false, true);
+		regPong = new TextureRegion(fboPong.getColorBufferTexture()); regPong.flip(false, true);
 	}
 
 	//justResumed is a bit of a hack to improve start time metrics on Android,
@@ -148,25 +199,187 @@ public class Game implements ApplicationListener {
 
 	@Override
 	public void render() {
-		//prevents weird rare cases where the app is running twice
-		if (instance != this){
-			finish();
+		if (instance != this){ finish(); return; }
+		if (justResumed){ justResumed = false; if (DeviceCompat.isAndroid()) return; }
+
+		boolean isGamePlay = scene != null && scene.getClass().getName().endsWith("GameScene");
+		boolean isSwitching = switchingScene();
+
+		if (isSwitching || !isGamePlay || fboBase == null) {
+			if (wasInGameplay) {
+				wasInGameplay = false;
+				Gdx.gl.glClearColor(0, 0, 0, 1);
+				Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+			}
+			NoosaScript.get().resetCamera();
+			NoosaScriptNoLighting.get().resetCamera();
+			Gdx.gl.glDisable(Gdx.gl.GL_SCISSOR_TEST);
+			Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+			draw();
+			Gdx.gl.glDisable( Gdx.gl.GL_SCISSOR_TEST );
+			step();
 			return;
 		}
 
-		if (justResumed){
-			justResumed = false;
-			if (DeviceCompat.isAndroid()) return;
-		}
+		wasInGameplay = true;
+		int w = Gdx.graphics.getWidth();
+		int h = Gdx.graphics.getHeight();
 
+		// === raw world render ===
+		fboWorld.begin();
 		NoosaScript.get().resetCamera();
 		NoosaScriptNoLighting.get().resetCamera();
-		Gdx.gl.glDisable(Gdx.gl.GL_SCISSOR_TEST);
-		Gdx.gl.glClear(Gdx.gl.GL_COLOR_BUFFER_BIT);
-		draw();
+		WaterScript.get().resetCamera();
+		Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+		Gdx.gl.glClearColor(0, 0, 0, 0);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		scene.drawWorld();
+		fboWorld.end();
 
-		Gdx.gl.glDisable( Gdx.gl.GL_SCISSOR_TEST );
-		
+		boolean useAdvancedLighting = true; //TODO SPD settings
+
+		// === dynamic light ===
+		if (useAdvancedLighting) {
+			fboLight.begin();
+			NoosaScript.get().resetCamera();
+			NoosaScriptNoLighting.get().resetCamera();
+			Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+			Gdx.gl.glClearColor(0.05f, 0.07f, 0.12f, 1.0f);
+			Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+			Gdx.gl.glEnable(GL20.GL_BLEND);
+			Gdx.gl.glBlendFunc(GL20.GL_ONE, GL20.GL_ONE);
+
+			scene.drawLightSources();
+
+			Blending.useDefault();
+			fboLight.end();
+		}
+
+		// === reflections ===
+		fboReflection.begin();
+		NoosaScript.get().resetCamera();
+		NoosaScriptNoLighting.get().resetCamera();
+		WaterScript.get().resetCamera();
+		Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+		Gdx.gl.glClearColor(0, 0, 0, 0);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		scene.drawReflections();
+		fboReflection.end();
+
+		// === fboBase (light + reflection) ===
+		fboBase.begin();
+		Gdx.gl.glClearColor(0, 0, 0, 1);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+
+		postBatch.begin();
+		if (useAdvancedLighting) {
+			postBatch.setShader(lightmapShader);
+			regLight.getTexture().bind(1);
+			Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+			lightmapShader.setUniformi("u_lightmap", 1);
+		} else {
+			postBatch.setShader(null);
+		}
+		postBatch.draw(regWorld, 0, 0, w, h);
+		postBatch.end();
+
+		postBatch.setShader(null);
+		Script.reset();
+		Blending.useDefault();
+		NoosaScript.get().resetCamera();
+		NoosaScriptNoLighting.get().resetCamera();
+		WaterScript.get().resetCamera();
+
+		scene.drawWater();
+		fboBase.end();
+
+		// === bloom ===
+		fboBloomMask.begin();
+		NoosaScript.get().resetCamera();
+		NoosaScriptNoLighting.get().resetCamera();
+		Gdx.gl.glClearColor(0, 0, 0, 1);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		scene.drawBloomObjects();
+		fboBloomMask.end();
+
+		glStateBuf.clear();
+		Gdx.gl.glGetIntegerv(GL20.GL_ELEMENT_ARRAY_BUFFER_BINDING, glStateBuf);
+		savedEbo = glStateBuf.get(0);
+		glStateBuf.clear();
+		Gdx.gl.glGetIntegerv(GL20.GL_ARRAY_BUFFER_BINDING, glStateBuf);
+		savedVbo = glStateBuf.get(0);
+
+		// === threshold mask  ===
+		fboPing.begin();
+		Gdx.gl.glClearColor(0, 0, 0, 1);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		postBatch.begin();
+		postBatch.setShader(thresholdShader);
+		// 0.55f..0.7f — light pixels
+		thresholdShader.setUniformf("u_threshold", 0.8f);
+		thresholdShader.setUniformf("u_thresholdInv", 2.5f);
+		postBatch.draw(regBloomMask, 0, 0, w, h);
+		postBatch.end();
+		fboPing.end();
+
+		// === blur horizontal ===
+		fboPong.begin();
+		Gdx.gl.glClearColor(0, 0, 0, 1);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		postBatch.begin();
+		postBatch.setShader(blurShader);
+		setBlurUniforms(blurShader, true, w, h);
+		postBatch.draw(regPing, 0, 0, w, h);
+		postBatch.end();
+		fboPong.end();
+
+		// === blur vertical ===
+		fboPing.begin();
+		Gdx.gl.glClearColor(0, 0, 0, 1);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		postBatch.begin();
+		postBatch.setShader(blurShader);
+		setBlurUniforms(blurShader, false, w, h);
+		postBatch.draw(regPong, 0, 0, w, h);
+		postBatch.end();
+		fboPing.end();
+
+		// === blending ===
+		Gdx.gl.glClearColor(0, 0, 0, 1);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+
+		ShaderProgram postShader = PostProcessingManager.instance.getActiveShader();
+
+		postBatch.begin();
+		if (postShader != null) {
+			postBatch.setShader(postShader);
+			PostProcessingManager.instance.bindUniforms(postShader);
+		} else {
+			postBatch.setShader(combineShader);
+			regPing.getTexture().bind(1);
+			Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+			combineShader.setUniformi("u_texture1", 1);
+			combineShader.setUniformf("u_src0Intensity", 1.0f);
+			combineShader.setUniformf("u_src1Intensity", 1.5f);
+			combineShader.setUniformf("u_src0Saturation", 1.0f);
+			combineShader.setUniformf("u_src1Saturation", 1.0f);
+		}
+
+		postBatch.draw(regBase, 0, 0, w, h);
+		postBatch.end();
+		postBatch.setShader(null);
+
+		// === ui and state recovery ===
+		if (Gdx.gl30 != null) Gdx.gl30.glBindVertexArray(0);
+		if (savedVbo != -1) Gdx.gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, savedVbo);
+		if (savedEbo != -1) Gdx.gl.glBindBuffer(GL20.GL_ELEMENT_ARRAY_BUFFER, savedEbo);
+
+		Script.reset();
+		Blending.useDefault();
+		Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+
+		scene.drawUI();
+		Gdx.gl.glDisable(Gdx.gl.GL_SCISSOR_TEST);
 		step();
 	}
 	
@@ -321,6 +534,25 @@ public class Game implements ApplicationListener {
 	public interface SceneChangeCallback{
 		void beforeCreate();
 		void afterCreate();
+	}
+
+	private void setBlurUniforms(com.badlogic.gdx.graphics.glutils.ShaderProgram shader, boolean horizontal, int w, int h) {
+		float[] weights = {0.05f, 0.09f, 0.12f, 0.15f, 0.18f, 0.15f, 0.12f, 0.09f, 0.05f};
+		float[] offsets = new float[18];
+		float texelSize = (1.0f / (horizontal ? w : h)) * 2.5f;
+
+		for (int i = 0; i < 9; i++) {
+			int offset = i - 4;
+			if (horizontal) {
+				offsets[i*2] = offset * texelSize;
+				offsets[i*2+1] = 0;
+			} else {
+				offsets[i*2] = 0;
+				offsets[i*2+1] = offset * texelSize;
+			}
+		}
+		shader.setUniform1fv("u_sampleWeights", weights, 0, 9);
+		shader.setUniform2fv("u_sampleOffsets", offsets, 0, 18);
 	}
 	
 }

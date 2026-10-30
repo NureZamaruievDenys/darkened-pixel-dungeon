@@ -58,6 +58,26 @@ public class Scene extends Group {
 	
 	}
 
+	public void drawWorld() {
+		draw();
+	}
+
+	public void drawWater(){
+
+	}
+
+	public void drawLightSources(){
+
+	}
+
+	public void drawReflections() {
+	}
+
+	public void drawBloomObjects() {
+	}
+
+	public void drawUI() {
+	}
 	@Override
 	public void update() {
 		super.update();

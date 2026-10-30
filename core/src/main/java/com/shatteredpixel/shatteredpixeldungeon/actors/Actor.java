@@ -193,6 +193,10 @@ public abstract class Actor implements Bundlable {
 	
 	public static void init() {
 		
+		if (Dungeon.level == null) {
+			throw new RuntimeException("Actor.init() called with null Dungeon.level");
+		}
+
 		add( Dungeon.hero );
 		
 		for (Mob mob : Dungeon.level.mobs) {
@@ -292,10 +296,31 @@ public abstract class Actor implements Bundlable {
 					current = null;
 				} else {
 					doNext = acting.act();
-					if (doNext && (Dungeon.hero == null || !Dungeon.hero.isAlive())) {
+
+					// --- НАЧАЛО МУЛЬТИПЛЕЕРА: ЗАМОРОЗКА ДВИЖКА ---
+					if (!doNext && acting instanceof com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero) {
+						com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero h = (com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero) acting;
+						if (h.networkWait) {
+							// Герой ждет сеть!
+							// ИСПРАВЛЕНИЕ: Мы СБРАСЫВАЕМ current, чтобы в следующем цикле
+							// движок снова мог опросить всех (и того, кому пришла команда!)
+							current = null;
+						} else {
+							// Обычная логика
+							// ИСПРАВЛЕНИЕ ДЛЯ ЧУЖИХ КУКОЛ:
+							// Мы делаем эту проверку только для ЛОКАЛЬНОГО героя,
+							// иначе чужой герой, походив, убивал бы движок, если Dungeon.hero мертв
+							if (h.playerId == 0 || h.playerId == com.shatteredpixel.shatteredpixeldungeon.network.NetworkManager.instance().localPlayerId()) {
+								if (Dungeon.hero == null || !Dungeon.hero.isAlive()) {
+									current = null;
+								}
+							}
+						}
+					} else if (doNext && (Dungeon.hero == null || !Dungeon.hero.isAlive())) {
 						doNext = false;
 						current = null;
 					}
+					// --- КОНЕЦ МУЛЬТИПЛЕЕРА ---
 				}
 			} else {
 				doNext = false;
@@ -313,12 +338,35 @@ public abstract class Actor implements Bundlable {
 
 					//signals to the gamescene that actor processing is finished for now
 					Thread.currentThread().notify();
-					
+
+					// --- МУЛЬТИПЛЕЕР: УМНОЕ ОЖИДАНИЕ ---
+					// Проверяем, есть ли хоть один герой, который ждет сеть
+					boolean someoneWaitingForNetwork = false;
+					if (com.shatteredpixel.shatteredpixeldungeon.network.NetworkManager.instance().isMultiplayer) {
+						for (Actor a : all) {
+							if (a instanceof com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero) {
+								if (((com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero) a).networkWait) {
+									someoneWaitingForNetwork = true;
+									break;
+								}
+							}
+						}
+					}
+
 					try {
-						Thread.currentThread().wait();
+						if (someoneWaitingForNetwork) {
+							// Если кто-то ждет сеть, мы спим МАКСИМУМ 50мс!
+							// Это заставит движок регулярно просыпаться и проверять очередь
+							// пакетов, даже если сетевой поток не смог нас разбудить напрямую!
+							Thread.currentThread().wait(50);
+						} else {
+							// Обычный сон до востребования
+							Thread.currentThread().wait();
+						}
 					} catch (InterruptedException e) {
 						interrupted = true;
 					}
+					// --- КОНЕЦ УМНОГО ОЖИДАНИЯ ---
 				}
 			}
 

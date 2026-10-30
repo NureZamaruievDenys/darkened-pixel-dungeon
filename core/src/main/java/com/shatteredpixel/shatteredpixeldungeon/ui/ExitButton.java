@@ -23,9 +23,11 @@ package com.shatteredpixel.shatteredpixeldungeon.ui;
 
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.network.NetworkManager;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndKeyBindings;
+import com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer;
 import com.watabou.input.GameAction;
 import com.watabou.noosa.Game;
 import com.watabou.utils.DeviceCompat;
@@ -44,6 +46,10 @@ public class ExitButton extends IconButton {
 		if (Game.scene() instanceof TitleScene) {
 			Game.instance.finish();
 		} else {
+			// НОВОЕ: Безопасно закрываем сервер и очищаем мультиплеер при выходе
+			NetworkManager.instance().stopHost();
+			WndMultiplayer.isMultiplayerPending = false;
+
 			ShatteredPixelDungeon.switchNoFade( TitleScene.class );
 		}
 	}

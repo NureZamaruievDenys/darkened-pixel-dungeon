@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.effects;
 
 import com.shatteredpixel.shatteredpixeldungeon.Assets;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.watabou.glwrap.Blending;
 import com.watabou.noosa.Game;
 import com.watabou.noosa.Image;
@@ -50,6 +51,7 @@ public class Beam extends Image {
 		scale.x = (float)Math.sqrt( dx * dx + dy * dy ) / width;
 		
 		timeLeft = this.duration = duration;
+		GameScene.addBloomObject(this);
 	}
 
 	public static class DeathRay extends Beam{

@@ -21,6 +21,7 @@
 
 package com.shatteredpixel.shatteredpixeldungeon.effects;
 
+import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.tiles.DungeonTilemap;
 import com.watabou.glwrap.Blending;
 import com.watabou.noosa.Game;
@@ -70,6 +71,7 @@ public class Lightning extends Group {
 		this.callback = callback;
 		
 		life = DURATION;
+		GameScene.addBloomObject(this);
 	}
 	
 	private static final double A = 180 / Math.PI;

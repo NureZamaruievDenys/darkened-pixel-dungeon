@@ -280,9 +280,9 @@ public class Dungeon {
 
 		hero = new Hero();
 		hero.live();
-		
+
 		Badges.reset();
-		
+
 		GamesInProgress.selectedClass.initHero( hero );
 	}
 
@@ -462,6 +462,11 @@ public class Dungeon {
 	}
 	
 	public static void switchLevel( final Level level, int pos ) {
+
+		// null level protect (multiplayer)
+		if (level == null) {
+			throw new RuntimeException("Dungeon.switchLevel() called with null level. Depth: " + Dungeon.depth + " Branch: " + Dungeon.branch);
+		}
 
 		//Position of -2 specifically means trying to place the hero the exit
 		if (pos == -2){

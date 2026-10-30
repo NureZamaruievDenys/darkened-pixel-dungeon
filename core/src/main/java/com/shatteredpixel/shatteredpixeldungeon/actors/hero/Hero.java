@@ -160,6 +160,8 @@ import com.shatteredpixel.shatteredpixeldungeon.levels.traps.Trap;
 import com.shatteredpixel.shatteredpixeldungeon.mechanics.Ballistica;
 import com.shatteredpixel.shatteredpixeldungeon.mechanics.ShadowCaster;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.network.NetworkManager;
+import com.shatteredpixel.shatteredpixeldungeon.network.dto.command.PlayerCommandDto;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.AlchemyScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
@@ -174,6 +176,7 @@ import com.shatteredpixel.shatteredpixeldungeon.windows.WndHero;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndResurrect;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndTradeItem;
 import com.watabou.noosa.Game;
+import com.watabou.noosa.PostProcessingManager;
 import com.watabou.noosa.audio.Sample;
 import com.watabou.noosa.tweeners.Delayer;
 import com.watabou.utils.BArray;
@@ -217,6 +220,11 @@ public class Hero extends Char {
 	public boolean damageInterrupt = true;
 	public HeroAction curAction = null;
 	public HeroAction lastAction = null;
+	public HeroAction lastNetworkAction = null;
+
+	public long playerId = 0;
+	public boolean isExecutingNetworkCommand = false;
+	public boolean networkWait = false; // НОВОЕ: Защита от двойного клика
 
 	//reference to the enemy the hero is currently in the process of attacking
 	private Char attackTarget;
@@ -826,17 +834,61 @@ public class Hero extends Char {
 		spend( time );
 		next();
 	}
-	
+
+	// action to network package
+	private com.shatteredpixel.shatteredpixeldungeon.network.dto.command.PlayerCommandDto createCommand(HeroAction action) {
+		com.shatteredpixel.shatteredpixeldungeon.network.dto.command.PlayerCommandDto dto = new com.shatteredpixel.shatteredpixeldungeon.network.dto.command.PlayerCommandDto();
+		dto.playerId = this.playerId;
+		if (action instanceof HeroAction.Move) { dto.type = "MOVE"; dto.targetCell = action.dst; }
+		else if (action instanceof HeroAction.Attack) { dto.type = "ATTACK"; dto.targetEntityId = ((HeroAction.Attack)action).target.id(); }
+		else if (action instanceof HeroAction.Interact) { dto.type = "INTERACT"; dto.targetEntityId = ((HeroAction.Interact)action).ch.id(); }
+		else if (action instanceof HeroAction.PickUp) { dto.type = "PICKUP"; dto.targetCell = action.dst; }
+		else if (action instanceof HeroAction.OpenChest) { dto.type = "OPEN_CHEST"; dto.targetCell = action.dst; }
+		else if (action instanceof HeroAction.Buy) { dto.type = "BUY"; dto.targetCell = action.dst; }
+		else if (action instanceof HeroAction.Unlock) { dto.type = "UNLOCK"; dto.targetCell = action.dst; }
+		else if (action instanceof HeroAction.Mine) { dto.type = "MINE"; dto.targetCell = action.dst; }
+		else if (action instanceof HeroAction.LvlTransition) { dto.type = "TRANSITION"; dto.targetCell = action.dst; }
+		else if (action instanceof HeroAction.Alchemy) { dto.type = "ALCHEMY"; dto.targetCell = action.dst; }
+		return dto;
+	}
+
+	// network package to action
+	private HeroAction parseCommand(com.shatteredpixel.shatteredpixeldungeon.network.dto.command.PlayerCommandDto cmd) {
+		switch (cmd.type) {
+			case "MOVE": return new HeroAction.Move(cmd.targetCell);
+			case "ATTACK":
+				Char tA = (Char)Actor.findById(cmd.targetEntityId);
+				return tA != null ? new HeroAction.Attack(tA) : null;
+			case "INTERACT":
+				Char tI = (Char)Actor.findById(cmd.targetEntityId);
+				return tI != null ? new HeroAction.Interact(tI) : null;
+			case "PICKUP": return new HeroAction.PickUp(cmd.targetCell);
+			case "OPEN_CHEST": return new HeroAction.OpenChest(cmd.targetCell);
+			case "BUY": return new HeroAction.Buy(cmd.targetCell);
+			case "UNLOCK": return new HeroAction.Unlock(cmd.targetCell);
+			case "MINE": return new HeroAction.Mine(cmd.targetCell);
+			case "TRANSITION": return new HeroAction.LvlTransition(cmd.targetCell);
+			case "ALCHEMY": return new HeroAction.Alchemy(cmd.targetCell);
+		}
+		return null;
+	}
+
+	public void syncMultiplayerPriority() {
+		if (this.playerId > 0) {
+			this.actPriority = 0 - (int)(this.playerId - 1);
+		}
+	}
+
 	@Override
 	public boolean act() {
-		
-		//calls to dungeon.observe will also update hero's local FOV.
+		networkWait = false;
+
 		fieldOfView = Dungeon.level.heroFOV;
 
 		if (buff(Endure.EndureTracker.class) != null){
 			buff(Endure.EndureTracker.class).endEnduring();
 		}
-		
+
 		if (!ready) {
 			//do a full observe (including fog update) if not resting.
 			if (!resting || buff(MindVision.class) != null || buff(Awareness.class) != null) {
@@ -846,88 +898,110 @@ public class Hero extends Char {
 				Dungeon.level.updateFieldOfView(this, fieldOfView);
 			}
 		}
-		
+
 		checkVisibleMobs();
 		BuffIndicator.refreshHero();
 		BuffIndicator.refreshBoss();
-		
+
 		if (paralysed > 0) {
-			
 			curAction = null;
-			
 			spendAndNext( TICK );
 			return false;
 		}
-		
-		boolean actResult;
+
+		boolean isLocal = (!NetworkManager.instance().isMultiplayer) ||
+				(this.playerId == NetworkManager.instance().localPlayerId());
+
+		if (NetworkManager.instance().isMultiplayer) {
+			PlayerCommandDto cmd = NetworkManager.instance().localClient().popCommand(this.playerId);
+
+			if (cmd != null) {
+				System.out.println("[HERO] Герой ID " + this.playerId + " ПОЛУЧИЛ команду из сети: " + cmd.type);
+				curAction = parseCommand(cmd);
+				lastNetworkAction = curAction;
+				isExecutingNetworkCommand = true;
+			}
+		}
+
 		if (curAction == null) {
-			
 			if (resting) {
 				spendConstant( TIME_TO_REST );
 				next();
+				return false;
 			} else {
-				ready();
-			}
-
-			//if we just loaded into a level and have a search buff, make sure to process them
-			if(Actor.now() == 0){
-				if (buff(Foresight.class) != null){
-					search(false);
-				} else if (buff(TalismanOfForesight.Foresight.class) != null){
-					buff(TalismanOfForesight.Foresight.class).checkAwareness();
+				if (isLocal) {
+					ready();
+					if (ready) return false;
+				} else {
+					networkWait = true;
+					return false;
 				}
 			}
-			
-			actResult = false;
-			
-		} else {
-			
-			resting = false;
-			
-			ready = false;
-			
-			if (curAction instanceof HeroAction.Move) {
-				actResult = actMove( (HeroAction.Move)curAction );
-				
-			} else if (curAction instanceof HeroAction.Interact) {
-				actResult = actInteract( (HeroAction.Interact)curAction );
-				
-			} else if (curAction instanceof HeroAction.Buy) {
-				actResult = actBuy( (HeroAction.Buy)curAction );
-				
-			}else if (curAction instanceof HeroAction.PickUp) {
-				actResult = actPickUp( (HeroAction.PickUp)curAction );
-				
-			} else if (curAction instanceof HeroAction.OpenChest) {
-				actResult = actOpenChest( (HeroAction.OpenChest)curAction );
-				
-			} else if (curAction instanceof HeroAction.Unlock) {
-				actResult = actUnlock((HeroAction.Unlock) curAction);
-				
-			} else if (curAction instanceof HeroAction.Mine) {
-				actResult = actMine( (HeroAction.Mine)curAction );
+		}
 
-			}else if (curAction instanceof HeroAction.LvlTransition) {
-				actResult = actTransition( (HeroAction.LvlTransition)curAction );
-				
-			} else if (curAction instanceof HeroAction.Attack) {
-				actResult = actAttack( (HeroAction.Attack)curAction );
-				
-			} else if (curAction instanceof HeroAction.Alchemy) {
-				actResult = actAlchemy( (HeroAction.Alchemy)curAction );
-				
-			} else {
-				actResult = false;
+		if (isLocal && NetworkManager.instance().isMultiplayer) {
+			if (curAction != lastNetworkAction && !isExecutingNetworkCommand) {
+				System.out.println("[HERO] Герой ID " + this.playerId + " ПЕРЕХВАТИЛ действие от UI. Отправляем в сеть...");
+				PlayerCommandDto cmd = createCommand(curAction);
+				NetworkManager.instance().localClient().sendNetworkPacket(cmd);
+
+				curAction = null;
+				busy();
+				networkWait = true;
+				return false;
 			}
 		}
-		
+
+		isExecutingNetworkCommand = false;
+		resting = false;
+		ready = false;
+
+		boolean actResult = performAction();
+
 		if(hasTalent(Talent.BARKSKIN) && Dungeon.level.map[pos] == Terrain.FURROWED_GRASS){
 			Barkskin.conditionallyAppend(this, (lvl*pointsInTalent(Talent.BARKSKIN))/2, 1 );
 		}
-		
+
 		return actResult;
 	}
-	
+
+	private boolean performAction() {
+		boolean actResult = false;
+
+		if (curAction instanceof HeroAction.Move) {
+			actResult = actMove( (HeroAction.Move)curAction );
+
+		} else if (curAction instanceof HeroAction.Interact) {
+			actResult = actInteract( (HeroAction.Interact)curAction );
+
+		} else if (curAction instanceof HeroAction.Buy) {
+			actResult = actBuy( (HeroAction.Buy)curAction );
+
+		} else if (curAction instanceof HeroAction.PickUp) {
+			actResult = actPickUp( (HeroAction.PickUp)curAction );
+
+		} else if (curAction instanceof HeroAction.OpenChest) {
+			actResult = actOpenChest( (HeroAction.OpenChest)curAction );
+
+		} else if (curAction instanceof HeroAction.Unlock) {
+			actResult = actUnlock((HeroAction.Unlock) curAction);
+
+		} else if (curAction instanceof HeroAction.Mine) {
+			actResult = actMine( (HeroAction.Mine)curAction );
+
+		} else if (curAction instanceof HeroAction.LvlTransition) {
+			actResult = actTransition( (HeroAction.LvlTransition)curAction );
+
+		} else if (curAction instanceof HeroAction.Attack) {
+			actResult = actAttack( (HeroAction.Attack)curAction );
+
+		} else if (curAction instanceof HeroAction.Alchemy) {
+			actResult = actAlchemy( (HeroAction.Alchemy)curAction );
+		}
+
+		return actResult;
+	}
+
 	public void busy() {
 		ready = false;
 	}
@@ -2599,6 +2673,7 @@ public class Hero extends Char {
 
 		Buff.affect(this, LostInventory.class);
 		Buff.affect(this, Invisibility.class, 3f);
+		PostProcessingManager.triggerTeleport();
 		//lost inventory is dropped in interlevelscene
 
 		//activate items that persist after lost inventory

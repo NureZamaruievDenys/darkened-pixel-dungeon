@@ -39,6 +39,7 @@ import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.sprites.ItemSpriteSheet;
 import com.watabou.noosa.Camera;
+import com.watabou.noosa.PostProcessingManager;
 import com.watabou.utils.BArray;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.watabou.noosa.audio.Sample;
@@ -281,6 +282,10 @@ public class ScrollOfTeleportation extends Scroll {
 
 		if (Dungeon.level.heroFOV[pos] || Dungeon.level.heroFOV[ch.pos]){
 			Sample.INSTANCE.play(Assets.Sounds.TELEPORT);
+		}
+
+		if (ch == Dungeon.hero) {
+			PostProcessingManager.triggerTeleport();
 		}
 
 		if (Dungeon.level.heroFOV[ch.pos] && ch != Dungeon.hero ) {

@@ -33,6 +33,7 @@ import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.ui.BuffIndicator;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
+import com.watabou.noosa.PostProcessingManager;
 import com.watabou.utils.Bundle;
 
 public class Hunger extends Buff implements Hero.Doom {
@@ -82,6 +83,7 @@ public class Hunger extends Buff implements Hero.Doom {
 
 				if (partialDamage > 1){
 					target.damage( (int)partialDamage, this);
+					PostProcessingManager.triggerStarvingFlash();
 					partialDamage -= (int)partialDamage;
 				}
 				
@@ -98,6 +100,7 @@ public class Hunger extends Buff implements Hero.Doom {
 
 					GLog.n( Messages.get(this, "onstarving") );
 					hero.damage( 1, this );
+					PostProcessingManager.triggerStarvingFlash();
 
 					hero.interrupt();
 					newLevel = STARVING;
@@ -153,6 +156,7 @@ public class Hunger extends Buff implements Hero.Doom {
 			partialDamage += excess * (target.HT/1000f);
 			if (partialDamage > 1f){
 				target.damage( (int)partialDamage, this );
+				PostProcessingManager.triggerStarvingFlash();
 				partialDamage -= (int)partialDamage;
 			}
 		}
@@ -162,6 +166,7 @@ public class Hunger extends Buff implements Hero.Doom {
 		} else if (oldLevel < STARVING && level >= STARVING){
 			GLog.n( Messages.get(this, "onstarving") );
 			target.damage( 1, this );
+			PostProcessingManager.triggerStarvingFlash();
 		}
 
 		BuffIndicator.refreshHero();

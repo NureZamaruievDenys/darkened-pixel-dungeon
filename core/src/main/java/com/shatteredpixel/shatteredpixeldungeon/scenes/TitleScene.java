@@ -32,6 +32,7 @@ import com.shatteredpixel.shatteredpixeldungeon.effects.BannerSprites;
 import com.shatteredpixel.shatteredpixeldungeon.effects.Fireball;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Languages;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.network.NetworkManager;
 import com.shatteredpixel.shatteredpixeldungeon.services.news.News;
 import com.shatteredpixel.shatteredpixeldungeon.services.updates.AvailableUpdateData;
 import com.shatteredpixel.shatteredpixeldungeon.services.updates.Updates;
@@ -58,6 +59,7 @@ import com.watabou.utils.ColorMath;
 import com.watabou.utils.DeviceCompat;
 import com.watabou.utils.GameMath;
 import com.watabou.utils.RectF;
+import com.shatteredpixel.shatteredpixeldungeon.windows.WndMultiplayer;
 
 import java.util.Date;
 
@@ -69,6 +71,7 @@ public class TitleScene extends PixelScene {
 	private Image signs;
 
 	private StyledButton btnPlay;
+	private StyledButton btnMultiplayer;
 	private StyledButton btnSupport;
 	private StyledButton btnRankings;
 	private StyledButton btnJournal;
@@ -85,6 +88,8 @@ public class TitleScene extends PixelScene {
 	public void create() {
 		
 		super.create();
+
+		NetworkManager.instance().stopHost();
 
 		Music.INSTANCE.playTracks(
 				new String[]{Assets.Music.THEME_1, Assets.Music.THEME_2},
@@ -171,6 +176,16 @@ public class TitleScene extends PixelScene {
 		btnPlay.icon(Icons.get(Icons.ENTER));
 		add(btnPlay);
 
+		btnMultiplayer = new StyledButton(GREY_TR, Messages.get(this, "multiplayer")) {
+			@Override
+			protected void onClick() {
+				super.onClick();
+				//TitleScene.this.addToFront(new WndMultiplayer());
+			}
+		};
+		btnMultiplayer.icon(Icons.get(Icons.DATA));
+		add(btnMultiplayer);
+
 		btnSupport = new SupportButton(GREY_TR, Messages.get(this, "support"));
 		add(btnSupport);
 
@@ -223,17 +238,21 @@ public class TitleScene extends PixelScene {
 		if (landscape()) {
 			btnPlay.setRect(btnAreaLeft, insets.top + topRegion+GAP, (buttonAreaWidth/2)-1, BTN_HEIGHT);
 			align(btnPlay);
-			btnSupport.setRect(btnPlay.right()+2, btnPlay.top(), btnPlay.width(), BTN_HEIGHT);
-			btnRankings.setRect(btnPlay.left(), btnPlay.bottom()+ GAP, (float) (Math.floor(buttonAreaWidth/3f)-1), BTN_HEIGHT);
+			btnMultiplayer.setRect(btnPlay.right()+2, btnPlay.top(), btnPlay.width(), BTN_HEIGHT);
+
+			btnSupport.setRect(btnPlay.left(), btnPlay.bottom()+ GAP, buttonAreaWidth, BTN_HEIGHT);
+			btnRankings.setRect(btnPlay.left(), btnSupport.bottom() + GAP, (float) (Math.floor(buttonAreaWidth/3f)-1), BTN_HEIGHT);
 			btnJournal.setRect(btnRankings.right()+2, btnRankings.top(), btnRankings.width(), BTN_HEIGHT);
 			btnNews.setRect(btnJournal.right()+2, btnJournal.top(), btnRankings.width(), BTN_HEIGHT);
 			btnSettings.setRect(btnRankings.left(), btnRankings.bottom() + GAP, btnRankings.width(), BTN_HEIGHT);
 			btnChanges.setRect(btnSettings.right()+2, btnSettings.top(), btnRankings.width(), BTN_HEIGHT);
 			btnAbout.setRect(btnChanges.right()+2, btnSettings.top(), btnRankings.width(), BTN_HEIGHT);
 		} else {
-			btnPlay.setRect(btnAreaLeft, insets.top + topRegion+GAP, buttonAreaWidth, BTN_HEIGHT);
+			btnPlay.setRect(btnAreaLeft, insets.top + topRegion+GAP, (buttonAreaWidth/2)-1, BTN_HEIGHT);
 			align(btnPlay);
-			btnSupport.setRect(btnPlay.left(), btnPlay.bottom()+ GAP, btnPlay.width(), BTN_HEIGHT);
+			btnMultiplayer.setRect(btnPlay.right()+2, btnPlay.top(), btnPlay.width(), BTN_HEIGHT);
+
+			btnSupport.setRect(btnPlay.left(), btnPlay.bottom()+ GAP, buttonAreaWidth, BTN_HEIGHT);
 			btnRankings.setRect(btnPlay.left(), btnSupport.bottom()+ GAP, (btnPlay.width()/2)-1, BTN_HEIGHT);
 			btnJournal.setRect(btnRankings.right()+2, btnRankings.top(), btnRankings.width(), BTN_HEIGHT);
 			btnNews.setRect(btnRankings.left(), btnRankings.bottom()+ GAP, btnRankings.width(), BTN_HEIGHT);
@@ -315,6 +334,7 @@ public class TitleScene extends PixelScene {
 		//signs.am = alpha; handles this itself
 
 		btnPlay.enable(alpha != 0);
+		btnMultiplayer.enable(false);
 		btnSupport.enable(alpha != 0);
 		btnRankings.enable(alpha != 0);
 		btnJournal.enable(alpha != 0);
@@ -324,6 +344,7 @@ public class TitleScene extends PixelScene {
 		btnAbout.enable(alpha != 0);
 
 		btnPlay.alpha(alpha);
+		btnMultiplayer.alpha(alpha);
 		btnSupport.alpha(alpha);
 		btnRankings.alpha(alpha);
 		btnJournal.alpha(alpha);

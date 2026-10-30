@@ -244,6 +244,12 @@ public class AscensionChallenge extends Buff {
 	}
 
 	private float stacks = 0;
+	public float getStacks() {
+		return stacks;
+	}
+	public void setStacks(float stacks) {
+		this.stacks = Math.max(0, stacks);
+	}
 	private float damageInc = 0;
 
 	private boolean stacksLowered = false;

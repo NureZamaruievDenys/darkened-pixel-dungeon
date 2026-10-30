@@ -25,7 +25,7 @@ import com.badlogic.gdx.Gdx;
 
 public class Uniform {
 
-	private int location;
+	public int location;
 	
 	public Uniform(int location) {
 		this.location = location;
@@ -46,6 +46,7 @@ public class Uniform {
 	public void value1f(float value) {
 		Gdx.gl.glUniform1f(location, value);
 	}
+	public void value1i( int v ) {Gdx.gl20.glUniform1i( location, v );}
 	
 	public void value2f(float v1, float v2) {
 		Gdx.gl.glUniform2f(location, v1, v2);
